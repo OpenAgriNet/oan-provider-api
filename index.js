@@ -8,21 +8,30 @@ app.use(express.json());
 app.post("/get_apmc_market_price", async (req, res) => {
   const { latitude, longitude, for_date, crops } = req.body;
 
-  if (!for_date || !Array.isArray(crops) || crops.length === 0) {
+  if (
+    !latitude ||
+    !longitude ||
+    !for_date ||
+    !Array.isArray(crops) ||
+    crops.length === 0
+  ) {
     return res.status(400).json({
       status: 400,
-      response: "Invalid payload: 'for_date' and 'crops' are required.",
-      data: []
+      response:
+        "Invalid payload: 'latitude','longitude','for_date' and 'crops' are required.",
+      data: [],
     });
   }
 
   const graphqlQuery = {
     query: `
-      query SearchMandi($for_date: date!, $crops: [String!]) {
+      query SearchMandi($for_date: date!, $crops: [String!], $latitude: String!, $longitude: String!) {
         mandihouse(
           where: {
             for_date: { _eq: $for_date },
-            crop_name: { _in: $crops }
+            crop_name: { _in: $crops },
+              latitude: { _eq: $latitude },
+                longitude: { _eq: $longitude },
           }
         ) {
           for_date
@@ -43,28 +52,27 @@ app.post("/get_apmc_market_price", async (req, res) => {
     `,
     variables: {
       for_date,
-      crops
-    }
+      crops,
+      latitude: typeof latitude == "string" ? latitude : latitude.toString(),
+      longitude:
+        typeof longitude == "string" ? longitude : longitude.toString(),
+    },
   };
 
   try {
-    const response = await axios.post(
-      process.env.HASURA_URL,
-      graphqlQuery,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "x-hasura-admin-secret": process.env.HASURA_ADMIN_SECRET
-        }
-      }
-    );
+    const response = await axios.post(process.env.HASURA_URL, graphqlQuery, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-hasura-admin-secret": process.env.HASURA_ADMIN_SECRET,
+      },
+    });
 
     if (response.data.errors) {
       console.error("GraphQL returned errors:", response.data.errors);
       return res.status(500).json({
         status: 500,
         response: "Error fetching APMC Market information",
-        data: []
+        data: [],
       });
     }
 
@@ -73,35 +81,40 @@ app.post("/get_apmc_market_price", async (req, res) => {
     res.status(200).json({
       status: 200,
       response: "APMC Market information retrieved successfully",
-      data: results
+      data: results,
     });
-
   } catch (err) {
     console.error("Hasura query error:", err.response?.data || err.message);
     res.status(500).json({
       status: 500,
       response: "Internal Server Error",
-      data: []
+      data: [],
     });
   }
 });
 
-app.post('/get_nearest_warehouses', async (req, res) => {
-    const { longitude, latitude } = req.body;
-  
-    if (typeof longitude !== 'number' || typeof latitude !== 'number') {
-      return res.status(400).json({
-        status: 400,
-        response: 'Invalid or missing longitude/latitude',
-        data: []
-      });
-    }
-  
-    // GraphQL query to get warehouses with distance calculation (assuming distance column or calculation exists)
-    // You might want to calculate distance on backend or DB side.
-    const query = `
-      query GetWarehouses {
-        warehouse(order_by: {distance: asc}, limit: 5) {
+app.post("/get_nearest_warehouses", async (req, res) => {
+  const { longitude, latitude } = req.body;
+
+  if (typeof longitude !== "string" || typeof latitude !== "string") {
+    return res.status(400).json({
+      status: 400,
+      response: "Invalid or missing longitude/latitude",
+      data: [],
+    });
+  }
+
+  // GraphQL query to get warehouses with distance calculation (assuming distance column or calculation exists)
+  // You might want to calculate distance on backend or DB side.
+  const graphqlQuery = {
+    query: `
+      query GetWarehouses($latitude: String!, $longitude: String!) {
+        warehouse(
+           where: {
+                latitude: { _eq: $latitude },
+                longitude: { _eq: $longitude },
+          }
+        ) {
           warehouse_code
           warehouse_name
           phone
@@ -116,42 +129,52 @@ app.post('/get_nearest_warehouses', async (req, res) => {
           distance_unit
         }
       }
-    `;
-  
-    try {
-      const response = await axios.post(process.env.HASURA_URL, {
-        query,
-      }, {
+    `,
+    variables: {
+      latitude: typeof latitude == "string" ? latitude : latitude.toString(),
+      longitude:
+        typeof longitude == "string" ? longitude : longitude.toString(),
+    },
+  };
+
+  try {
+    const response = await axios.post(
+      process.env.HASURA_URL,
+
+      graphqlQuery,
+
+      {
         headers: {
-          'Content-Type': 'application/json',
-          'x-hasura-admin-secret': process.env.HASURA_ADMIN_SECRET
-        }
-      });
-  
-      if (response.data.errors) {
-        return res.status(500).json({
-          status: 500,
-          response: 'Error fetching warehouses from Hasura',
-          data: response.data.errors,
-        });
+          "Content-Type": "application/json",
+          "x-hasura-admin-secret": process.env.HASURA_ADMIN_SECRET,
+        },
       }
-  
-      const warehouses = response.data.data.warehouse;
-  
-      return res.json({
-        status: 200,
-        response: 'Nearest Warehouse information retrieved successfully',
-        data: warehouses,
-      });
-    } catch (error) {
-      console.error('Hasura query error:', error.message);
+    );
+
+    if (response.data.errors) {
       return res.status(500).json({
         status: 500,
-        response: 'Internal server error',
-        data: [],
+        response: "Error fetching warehouses from Hasura",
+        data: response.data.errors,
       });
     }
-  });
+
+    const warehouses = response.data.data.warehouse;
+
+    return res.json({
+      status: 200,
+      response: "Nearest Warehouse information retrieved successfully",
+      data: warehouses,
+    });
+  } catch (error) {
+    console.error("Hasura query error:", error.message);
+    return res.status(500).json({
+      status: 500,
+      response: "Internal server error",
+      data: [],
+    });
+  }
+});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
